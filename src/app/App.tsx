@@ -1,0 +1,121 @@
+import { useEffect } from "react";
+import { HashRouter } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
+import { ToastProvider, AppleEmojiProvider, RootErrorBoundary, GlobalTooltip, WindowAnimationContainer } from "@/shared/ui";
+import { useWindowDrag } from "@/shared/hooks";
+import { useAppIconSync } from "@/features/player";
+import { I18nProvider } from "@/languages";
+import { AuthLock } from "@/features/auth";
+import { HumanCheckNotice } from "@/features/human-check";
+import { CoverSwRegistrar } from "@/features/covers";
+import { usePresenceSync } from "@/shared/presence";
+import { useThemeCustomizationSync } from "@/features/settings/hooks/useThemeCustomizationSync";
+import { PreferencesSync } from "@/features/settings/sync";
+import { useTouchBarSync } from "@/features/touchbar";
+import { useOverlaySync } from "@/features/overlay";
+import { useDiscordSync } from "@/features/discord";
+import { useLastfmScrobbler } from "@/features/lastfm";
+import { useAutoSync } from "@/features/auto";
+import { PartySheet, usePartySync } from "@/features/party";
+import { DeviceControlSheet } from "@/features/deviceControl";
+import { AppRoutes, prefetchRoutes } from "./routes";
+import DeeplinkHandler from "./DeeplinkHandler";
+import EnvironmentWarning from "./EnvironmentWarning";
+import { ConnectivityWall } from "@/features/connectivity";
+import "./globals.css";
+
+function AppIconSync() {
+  useAppIconSync();
+  return null;
+}
+
+function PresenceSync() {
+  usePresenceSync();
+  return null;
+}
+
+function ThemeSync() {
+  useThemeCustomizationSync();
+  return null;
+}
+
+function TouchBarSync() {
+  useTouchBarSync();
+  return null;
+}
+
+function OverlaySync() {
+  useOverlaySync();
+  return null;
+}
+
+function DiscordSync() {
+  useDiscordSync();
+  return null;
+}
+
+function LastfmSync() {
+  useLastfmScrobbler();
+  return null;
+}
+
+function AutoSync() {
+  useAutoSync();
+  return null;
+}
+
+function PartySync() {
+  usePartySync();
+  return null;
+}
+
+export default function App() {
+  useWindowDrag();
+
+  useEffect(() => {
+    prefetchRoutes();
+  }, []);
+
+  return (
+    <HashRouter>
+      <CoverSwRegistrar />
+      <ThemeProvider
+        attribute="data-theme"
+        defaultTheme="system"
+        enableSystem={true}
+        disableTransitionOnChange
+      >
+        <GlobalTooltip />
+        <ThemeSync />
+        <AppIconSync />
+        <PresenceSync />
+        <TouchBarSync />
+        <OverlaySync />
+        <DiscordSync />
+        <LastfmSync />
+        <AutoSync />
+        <PartySync />
+        <AppleEmojiProvider>
+          <I18nProvider>
+            <PreferencesSync />
+            <ToastProvider>
+              <RootErrorBoundary>
+                <WindowAnimationContainer>
+                  <DeeplinkHandler />
+                  <EnvironmentWarning />
+                  <PartySheet />
+                  <DeviceControlSheet />
+                  <HumanCheckNotice />
+                  <ConnectivityWall />
+                  <AuthLock>
+                    <AppRoutes />
+                  </AuthLock>
+                </WindowAnimationContainer>
+              </RootErrorBoundary>
+            </ToastProvider>
+          </I18nProvider>
+        </AppleEmojiProvider>
+      </ThemeProvider>
+    </HashRouter>
+  );
+}

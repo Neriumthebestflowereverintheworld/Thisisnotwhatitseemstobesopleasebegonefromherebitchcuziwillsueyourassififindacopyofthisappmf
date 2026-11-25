@@ -1,0 +1,350 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+      - mobile
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Linux packages (AppImage & deb)
+        run: pnpm run electron:build:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_URL: https://liner-api.lucabatarcian.workers.dev
+          VITE_COVERS_PROXY_URL: https://covers.tryliner.fun
+          VITE_PARTY_RELAY_URL: ${{ vars.VITE_PARTY_RELAY_URL }}
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/latest-linux.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows installer (NSIS)
+        run: pnpm run electron:build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_URL: https://liner-api.lucabatarcian.workers.dev
+          VITE_COVERS_PROXY_URL: https://covers.tryliner.fun
+          VITE_PARTY_RELAY_URL: ${{ vars.VITE_PARTY_RELAY_URL }}
+
+      - name: Verify native snap preview add-on is packaged
+        shell: pwsh
+        run: |
+          $addon = "release/win-unpacked/resources/app.asar.unpacked/native/snap-preview/build/Release/snap_preview.node"
+          if (-not (Test-Path $addon)) { throw "snap_preview.node missing from the package: $addon" }
+          Write-Host "ok: $addon ($((Get-Item $addon).Length) bytes)"
+          node scripts/verify-native-addon.cjs $addon
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/*.exe
+            release/latest.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build macOS packages (DMG & ZIP)
+        run: pnpm run electron:build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          VITE_API_URL: https://liner-api.lucabatarcian.workers.dev
+          VITE_COVERS_PROXY_URL: https://covers.tryliner.fun
+          VITE_PARTY_RELAY_URL: ${{ vars.VITE_PARTY_RELAY_URL }}
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/latest-mac.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web bundle
+        run: pnpm build
+        env:
+          VITE_API_URL: https://liner-api.lucabatarcian.workers.dev
+          VITE_COVERS_PROXY_URL: https://covers.tryliner.fun
+          VITE_PARTY_RELAY_URL: ${{ vars.VITE_PARTY_RELAY_URL }}
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Configure release signing (optional)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/neritium-release.jks
+            printf 'storeFile=neritium-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" \
+              > android/keystore.properties
+            echo "Release keystore configured — APK will be signed."
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret — building an unsigned release APK."
+          fi
+
+      - name: Build Android APKs (release + debug)
+        working-directory: android
+        run: ./gradlew :app:assembleRelease :app:assembleDebug --no-daemon
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect APK
+        run: |
+          mkdir -p android-out
+          find android/app/build/outputs/apk -name '*.apk' -exec cp {} android-out/ \;
+          ls -la android-out
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android-out/*.apk
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web renderer
+        run: pnpm build
+        env:
+          VITE_API_URL: https://liner-api.lucabatarcian.workers.dev
+          VITE_COVERS_PROXY_URL: https://covers.tryliner.fun
+          VITE_PARTY_RELAY_URL: ${{ vars.VITE_PARTY_RELAY_URL }}
+
+      - name: Sync renderer into the iOS bundle
+        run: bash ios/sync-web.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Read app version
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Archive app (unsigned)
+        run: |
+          xcodebuild \
+            -project ios/Neritium.xcodeproj \
+            -scheme Neritium \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ios/build/DerivedData \
+            -archivePath ios/build/Neritium.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="ios/build/Neritium.xcarchive/Products/Applications/Neritium.app"
+          test -d "$APP"
+          rm -rf ios/build/Payload Neritium-unsigned.ipa
+          mkdir -p ios/build/Payload
+          cp -R "$APP" ios/build/Payload/
+          (cd ios/build && ditto -c -k --sequesterRsrc --keepParent Payload ../../Neritium-unsigned.ipa)
+          ls -lh Neritium-unsigned.ipa
+
+      - name: Upload iOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: Neritium-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-release:
+    name: Publish Release
+    needs: [build-linux, build-windows, build-macos, build-android, build-ios]
+    runs-on: ubuntu-latest
+    # Tag pushes publish their own version; pushes to the mobile branch publish
+    # the package.json version so sideloaded/installed builds can auto-update
+    # without waiting for a manual tag.
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/mobile'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Resolve release tag
+        id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Neritium ${{ steps.release.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/linux-packages/*.AppImage
+            artifacts/linux-packages/*.deb
+            artifacts/linux-packages/latest-linux.yml
+            artifacts/windows-installer/*.exe
+            artifacts/windows-installer/latest.yml
+            artifacts/macos-packages/*.dmg
+            artifacts/macos-packages/*.zip
+            artifacts/macos-packages/latest-mac.yml
+            artifacts/android-apk/*.apk
+            artifacts/ios-ipa/*.ipa
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

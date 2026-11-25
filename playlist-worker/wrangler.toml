@@ -1,0 +1,15 @@
+name = "liner-shared-playlists"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[vars]
+# The shared-playlist Worker has no JWT secret of its own: it authenticates by
+# calling the API's /v1/me with the caller's bearer token. That must be the SAME
+# API the app signs into, or every request comes back 401.
+PRIMARY_API_URL = "https://liner-api.lucabatarcian.workers.dev"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "liner"
+database_id = "3e8cf84c-da67-4c76-bda6-851ab92ff7a2"
+migrations_dir = "migrations"

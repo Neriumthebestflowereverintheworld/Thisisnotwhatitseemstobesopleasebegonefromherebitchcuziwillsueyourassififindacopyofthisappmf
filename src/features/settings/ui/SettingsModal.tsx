@@ -1,0 +1,734 @@
+import { useMemo, useState, useEffect, useRef, type ComponentType } from "react";
+import { motion } from "framer-motion";
+import { CloseLine, Search2Line, CloseCircleFill, ExitLine, ArrowLeftLine, RightLine, DiscordFill, KeyboardLine, MusicLine, RemoteControlLine, ChartBarLine } from "@mingcute/react";
+import {
+  Play,
+  Palette,
+  Gallery,
+  HeadphonesRound,
+  InfoCircle,
+  Database,
+  Widget5,
+  Book2,
+  QuestionCircle,
+  Vinyl,
+} from "@solar-icons/react";
+import Dialog from "@/shared/ui/Dialog";
+import { UserAvatar } from "@/shared/ui";
+import { useTranslation, getTranslationsForAllLocales } from "@/languages";
+import { useModalStore } from "@/features/library/store/modalStore";
+import { useAuthStore } from "@/features/auth";
+import { isAndroidApp } from "@/platform";
+import {
+  PlaybackTab,
+  ShortcutsTab,
+  AppearanceTab,
+  CustomizationTab,
+  AudioTab,
+  StorageTab,
+  AboutTab,
+  OverlayTab,
+  DiscordTab,
+  LastFmTab,
+  SpotifyTab,
+  DevicesTab,
+  ListeningTab,
+} from "./tabs";
+import { isSpotifyAccountAvailable } from "@/features/library/services/import/sources/spotify/spotifyAccount";
+
+/**
+ * Settings is a two-level menu.
+ *
+ * Level 1 lists a handful of grouped categories instead of every tab, so the
+ * dialog never shows a wall of navigation. Level 2 opens one category in its
+ * own screen (with a back button) and stacks that category's sections under
+ * their own headings. Desktop and Android share this exact structure.
+ */
+type SectionId =
+  | "Playback"
+  | "Shortcuts"
+  | "Overlay"
+  | "Discord"
+  | "LastFm"
+  | "Spotify"
+  | "Appearance"
+  | "Customization"
+  | "Audio"
+  | "Storage"
+  | "About"
+  | "Devices"
+  | "Listening";
+type CategoryId = "playback" | "appearance" | "overlay" | "storage" | "about" | "listening";
+type GroupId = "preferences" | "application";
+
+const SECTION_ICONS: Record<SectionId, typeof Play> = {
+  Playback: Play,
+  Shortcuts: KeyboardLine,
+  Overlay: Widget5,
+  Discord: DiscordFill,
+  LastFm: MusicLine,
+  Spotify: Vinyl,
+  Appearance: Palette,
+  Customization: Gallery,
+  Audio: HeadphonesRound,
+  Storage: Database,
+  About: InfoCircle,
+  Devices: RemoteControlLine,
+  Listening: ChartBarLine,
+};
+
+const SECTION_COMPONENTS: Record<SectionId, ComponentType<{ searchQuery?: string }>> = {
+  Playback: PlaybackTab,
+  Shortcuts: ShortcutsTab,
+  Overlay: OverlayTab,
+  Discord: DiscordTab,
+  LastFm: LastFmTab,
+  Spotify: SpotifyTab,
+  Appearance: AppearanceTab,
+  Customization: CustomizationTab,
+  Audio: AudioTab,
+  Storage: StorageTab,
+  About: AboutTab,
+  Devices: DevicesTab,
+  Listening: ListeningTab,
+};
+
+const CATEGORIES: { id: CategoryId; group: GroupId; sections: SectionId[] }[] = [
+  { id: "playback", group: "preferences", sections: ["Playback", "Shortcuts", "Audio", "LastFm", "Spotify", "Devices"] },
+  { id: "appearance", group: "preferences", sections: ["Appearance", "Customization"] },
+  { id: "overlay", group: "preferences", sections: ["Overlay", "Discord"] },
+  { id: "storage", group: "application", sections: ["Storage"] },
+  { id: "listening", group: "application", sections: ["Listening"] },
+  { id: "about", group: "application", sections: ["About"] },
+];
+
+const GROUP_IDS: GroupId[] = ["preferences", "application"];
+
+
+const SETTING_ITEMS: { sectionId: SectionId; titleKey: string; descKey?: string; overlayOnly?: boolean }[] = [
+  // Playback
+  { sectionId: "Playback", titleKey: "settings.autoplay_similar.title", descKey: "settings.autoplay_similar.description" },
+  { sectionId: "Playback", titleKey: "settings.transitions.title", descKey: "settings.transitions.description" },
+  { sectionId: "Playback", titleKey: "settings.sleep_timer.title", descKey: "settings.sleep_timer.description" },
+  { sectionId: "Playback", titleKey: "settings.track_double_click.title", descKey: "settings.track_double_click.description" },
+  { sectionId: "Playback", titleKey: "settings.default_playback_context.title", descKey: "settings.default_playback_context.description" },
+  { sectionId: "Playback", titleKey: "settings.audio.pause_on_device_change.title", descKey: "settings.audio.pause_on_device_change.description" },
+
+  // Shortcuts (desktop only)
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.global_section", descKey: "settings.shortcuts.global_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.main_app_section", descKey: "settings.shortcuts.main_app_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.miniplayer_section", descKey: "settings.shortcuts.miniplayer_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.toggle_overlay", descKey: "settings.shortcuts.toggle_overlay_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.quick_like_song", descKey: "settings.shortcuts.quick_like_song_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.play_pause", descKey: "settings.shortcuts.play_pause_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.next_track", descKey: "settings.shortcuts.next_track_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.prev_track", descKey: "settings.shortcuts.prev_track_desc", overlayOnly: true },
+  { sectionId: "Shortcuts", titleKey: "settings.shortcuts.like_track", descKey: "settings.shortcuts.like_track_desc", overlayOnly: true },
+
+  // Overlay
+  { sectionId: "Overlay", titleKey: "settings.overlay.position.title", descKey: "settings.overlay.position.description", overlayOnly: true },
+  { sectionId: "Overlay", titleKey: "settings.overlay.show_lyrics.title", descKey: "settings.overlay.show_lyrics.description", overlayOnly: true },
+  { sectionId: "Overlay", titleKey: "settings.overlay.auto_show_on_minimize.title", descKey: "settings.overlay.auto_show_on_minimize.description", overlayOnly: true },
+  { sectionId: "Overlay", titleKey: "settings.overlay.always_on_top.title", descKey: "settings.overlay.always_on_top.description", overlayOnly: true },
+
+  // Discord
+  { sectionId: "Discord", titleKey: "settings.discord.enable.title", descKey: "settings.discord.enable.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_timeline.title", descKey: "settings.discord.show_timeline.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_artwork.title", descKey: "settings.discord.show_artwork.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_artist_image.title", descKey: "settings.discord.show_artist_image.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_paused.title", descKey: "settings.discord.show_paused.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_button.title", descKey: "settings.discord.show_button.description" },
+  { sectionId: "Discord", titleKey: "settings.discord.show_download_button.title", descKey: "settings.discord.show_download_button.description" },
+
+  // Last.fm
+  { sectionId: "LastFm", titleKey: "settings.lastfm.enable.title", descKey: "settings.lastfm.enable.description" },
+  { sectionId: "LastFm", titleKey: "settings.lastfm.account.title", descKey: "settings.lastfm.account.description" },
+
+  // Spotify account import
+  { sectionId: "Spotify", titleKey: "settings.spotify.account.title", descKey: "settings.spotify.account.description" },
+  { sectionId: "Spotify", titleKey: "settings.spotify.liked.title", descKey: "settings.spotify.liked.description" },
+  { sectionId: "Spotify", titleKey: "settings.spotify.playlists.title", descKey: "settings.spotify.playlists.description" },
+
+  // Device control
+  { sectionId: "Devices", titleKey: "settings.devices.section_title", descKey: "settings.devices.section_desc" },
+
+  // Appearance
+  { sectionId: "Appearance", titleKey: "settings.language.label", descKey: "settings.language.description" },
+  { sectionId: "Appearance", titleKey: "settings.theme.title", descKey: "settings.theme.description" },
+  { sectionId: "Appearance", titleKey: "settings.branding.title", descKey: "settings.branding.description" },
+
+  // Customization
+  { sectionId: "Customization", titleKey: "settings.customization.wallpaper_title", descKey: "settings.customization.wallpaper_description" },
+  { sectionId: "Customization", titleKey: "settings.customization.blocks_title", descKey: "settings.customization.blocks_description" },
+  { sectionId: "Customization", titleKey: "settings.customization.reset_all", descKey: "settings.customization.reset_all_desc" },
+
+  // Audio
+  { sectionId: "Audio", titleKey: "settings.audio.title", descKey: "settings.audio.description" },
+  { sectionId: "Audio", titleKey: "settings.connection.checks_title" },
+
+  // Storage
+  { sectionId: "Storage", titleKey: "settings.storage.title", descKey: "settings.storage.description" },
+  { sectionId: "Storage", titleKey: "settings.storage.usage_title" },
+  { sectionId: "Storage", titleKey: "settings.storage.open_folder", descKey: "settings.storage.open_folder_description" },
+
+  // Listening
+  { sectionId: "Listening", titleKey: "settings.listening.stats_title", descKey: "settings.listening.stats_description" },
+  { sectionId: "Listening", titleKey: "settings.listening.by_month" },
+  { sectionId: "Listening", titleKey: "home.recap.topTracks" },
+  { sectionId: "Listening", titleKey: "home.recap.topArtist" },
+
+  // About
+  { sectionId: "About", titleKey: "settings.about.neritium", descKey: "common.app.version" },
+  { sectionId: "About", titleKey: "settings.notifications.test_button" },
+];
+
+const SECTION_LABEL_KEYS: Record<SectionId, string> = {
+  Playback: "settings.tabs.playback",
+  Shortcuts: "settings.tabs.shortcuts",
+  Overlay: "settings.tabs.overlay",
+  Discord: "settings.tabs.discord",
+  LastFm: "settings.tabs.lastfm",
+  Spotify: "settings.tabs.spotify",
+  Appearance: "settings.theme.title",
+  Customization: "settings.tabs.customization",
+  Audio: "settings.tabs.audio",
+  Storage: "settings.tabs.storage",
+  About: "settings.tabs.about",
+  Devices: "settings.devices.section_title",
+  Listening: "settings.listening.title",
+};
+
+const SECTION_DESC_KEYS: Record<SectionId, string> = {
+  Playback: "settings.playback.description",
+  Shortcuts: "settings.shortcuts.description",
+  Overlay: "settings.overlay.description",
+  Discord: "settings.discord.description",
+  LastFm: "settings.lastfm.description",
+  Spotify: "settings.spotify.description",
+  Appearance: "settings.theme.description",
+  Customization: "settings.customization.description",
+  Audio: "settings.audio.description",
+  Storage: "settings.storage.description",
+  About: "settings.about.tagline",
+  Devices: "settings.devices.section_desc",
+  Listening: "settings.listening.description",
+};
+
+const font = { fontFamily: "var(--font-inter), sans-serif" } as const;
+
+export default function SettingsModal() {
+  const { t } = useTranslation();
+  const open = useModalStore((state) => state.settingsOpen);
+  const close = useModalStore((state) => state.closeSettings);
+
+  const [openCategoryId, setOpenCategoryId] = useState<CategoryId | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [navDirection, setNavDirection] = useState<1 | -1>(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingSectionRef = useRef<SectionId | null>(null);
+
+  const handleClose = () => {
+    setSearchQuery("");
+    setOpenCategoryId(null);
+    close();
+  };
+
+  const openCategory = (id: CategoryId, focusSection?: SectionId) => {
+    pendingSectionRef.current = focusSection ?? null;
+    setNavDirection(1);
+    setOpenCategoryId(id);
+  };
+
+  const backToMenu = () => {
+    setNavDirection(-1);
+    setOpenCategoryId(null);
+  };
+
+  const categoryTitles: Record<CategoryId, string> = {
+    playback: t("settings.categories.playback.title"),
+    appearance: t("settings.categories.appearance.title"),
+    // On Android this category renders the Discord section alone.
+    overlay: isAndroidApp()
+      ? t("settings.tabs.discord") || "Discord"
+      : t("settings.categories.overlay.title"),
+    storage: t("settings.categories.storage.title"),
+    about: t("settings.categories.about.title"),
+    listening: t("settings.categories.listening.title"),
+  };
+
+  const categoryDescriptions: Record<CategoryId, string> = {
+    playback: t("settings.categories.playback.description"),
+    appearance: t("settings.categories.appearance.description"),
+    overlay: t("settings.categories.overlay.description"),
+    storage: t("settings.categories.storage.description"),
+    about: t("settings.categories.about.description"),
+    listening: t("settings.categories.listening.description"),
+  };
+
+  const sectionTitles: Record<SectionId, string> = {
+    Playback: t("settings.tabs.playback"),
+    Shortcuts: t("settings.tabs.shortcuts") || "Shortcuts",
+    Overlay: t("settings.tabs.overlay") || "Overlay",
+    Discord: t("settings.tabs.discord") || "Discord RPC",
+    LastFm: t("settings.tabs.lastfm") || "Last.fm",
+    Spotify: t("settings.tabs.spotify") || "Spotify",
+    Appearance: t("settings.tabs.appearance"),
+    Customization: t("settings.tabs.customization") || "Customization",
+    Audio: t("settings.tabs.audio"),
+    Storage: t("settings.tabs.storage"),
+    About: t("settings.tabs.about"),
+    Devices: t("settings.devices.section_title") || "Device control",
+    Listening: t("settings.listening.title") || "Listening",
+  };
+
+  const sectionDescriptions: Record<SectionId, string> = {
+    Playback: t("settings.playback.description"),
+    Shortcuts: t("settings.shortcuts.description") || "System-wide and player keyboard shortcuts.",
+    Overlay: t("settings.overlay.description") || "Desktop overlay behavior, position and lyrics display.",
+    Discord: t("settings.discord.description") || "Show what you're listening to on Discord with artwork, artist badge and progress bar.",
+    LastFm: t("settings.lastfm.description") || "Scrobble what you listen to to your Last.fm profile.",
+    Spotify: t("settings.spotify.description") || "Import your Spotify playlists and liked songs into Neritium.",
+    Appearance: t("settings.theme.description"),
+    Customization: t("settings.customization.description") || "Window background wallpaper, transparency and block blur effects.",
+    Audio: t("settings.audio.description"),
+    Storage: t("settings.storage.description"),
+    About: t("settings.about.tagline"),
+    Devices: t("settings.devices.section_desc") || "Control playback on another device from here, or let your devices control this one.",
+    Listening: t("settings.listening.description") || "Your listening history for the year.",
+  };
+
+  const isSearching = searchQuery.trim().length > 0;
+
+  // Sections whose own label/description matches, and sections that contain a
+  // matching setting row. The latter decides which rows get filtered down, so
+  // a label-only hit still opens a fully populated section.
+  const matches = useMemo(() => {
+    if (!searchQuery.trim()) return { labelMatches: null, rowMatches: null };
+    const query = searchQuery.toLowerCase().trim();
+    const labelMatches = new Set<SectionId>();
+    const rowMatches = new Set<SectionId>();
+    // On Android the Overlay and Shortcuts sections are desktop-only, so their
+    // labels and rows must not surface in search there.
+    const android = isAndroidApp();
+
+    (Object.keys(SECTION_LABEL_KEYS) as SectionId[]).forEach((sectionId) => {
+      if (android && (sectionId === "Overlay" || sectionId === "Shortcuts")) return;
+      if (sectionId === "Spotify" && !isSpotifyAccountAvailable()) return;
+      const texts = [
+        ...getTranslationsForAllLocales(SECTION_LABEL_KEYS[sectionId]),
+        ...getTranslationsForAllLocales(SECTION_DESC_KEYS[sectionId]),
+      ];
+      if (texts.some((txt) => txt.toLowerCase().includes(query))) labelMatches.add(sectionId);
+    });
+
+    SETTING_ITEMS.forEach((item) => {
+      if (android && item.overlayOnly) return;
+      const texts = [
+        ...getTranslationsForAllLocales(item.titleKey),
+        ...(item.descKey ? getTranslationsForAllLocales(item.descKey) : []),
+      ];
+      if (texts.some((txt) => txt.toLowerCase().includes(query))) rowMatches.add(item.sectionId);
+    });
+
+    return { labelMatches, rowMatches };
+  }, [searchQuery]);
+
+  const matchingSections = useMemo(() => {
+    const set = new Set<SectionId>();
+    if (matches.labelMatches) for (const id of matches.labelMatches) set.add(id);
+    if (matches.rowMatches) for (const id of matches.rowMatches) set.add(id);
+    return set;
+  }, [matches]);
+
+  // The overlay is a separate always-on-top desktop window and has no Android
+  // equivalent, so that category is kept only where something inside it
+  // actually works: the floating window on desktop, and Discord Rich Presence
+  // (shipped through the Android platform shim) on Android.
+  const availableCategories = useMemo(
+    () =>
+      CATEGORIES.filter((cat) => {
+        if (cat.id !== "overlay" || !isAndroidApp()) return true;
+        return Boolean(window.neritiumElectron?.discordUpdateState);
+      }),
+    [],
+  );
+
+  const visibleCategories = useMemo(() => {
+    if (!isSearching) return availableCategories;
+    return availableCategories.filter((cat) => cat.sections.some((id) => matchingSections.has(id)));
+  }, [availableCategories, isSearching, matchingSections]);
+
+  // Flat section hits for the search results list (level 1 search results).
+  const searchResults = useMemo(() => {
+    if (!isSearching) return null;
+    return visibleCategories.flatMap((cat) =>
+      cat.sections
+        .filter((id) => matchingSections.has(id))
+        .map((sectionId) => ({ categoryId: cat.id, sectionId })),
+    );
+  }, [isSearching, visibleCategories, matchingSections]);
+
+  const activeCategory = useMemo(
+    () => visibleCategories.find((cat) => cat.id === openCategoryId) ?? null,
+    [visibleCategories, openCategoryId],
+  );
+
+  // When search opened a category, jump to the section that matched; a plain
+  // menu tap just starts the screen at the top.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const pending = pendingSectionRef.current;
+    pendingSectionRef.current = null;
+    if (pending) {
+      const target = el.querySelector<HTMLElement>(`[data-section="${pending}"]`);
+      if (target) {
+        requestAnimationFrame(() => target.scrollIntoView?.({ block: "start" }));
+        return;
+      }
+    }
+    el.scrollTop = 0;
+  }, [openCategoryId]);
+
+  const openExternal = (url: string) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const displayName =
+    user?.displayName ||
+    user?.username ||
+    user?.email?.split("@")[0] ||
+    "Neritium";
+  const handle = user?.username ? `@${user.username}` : (user?.email ?? t("settings.manage_account"));
+
+  const closeIcon = (
+    <button
+      type="button"
+      aria-label={t("common.close") || "Close"}
+      onClick={handleClose}
+      className="w-[30px] h-[30px] shrink-0 inline-flex items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors border-0 bg-transparent p-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+    >
+      <CloseLine size={17} />
+    </button>
+  );
+
+  const renderCategoryRow = (cat: { id: CategoryId; sections: SectionId[] }) => {
+    const Icon = SECTION_ICONS[cat.sections[0]];
+    return (
+      <button
+        key={cat.id}
+        type="button"
+        onClick={() => {
+          setSearchQuery("");
+          openCategory(cat.id);
+        }}
+        className="group w-full flex items-center gap-[12px] px-[12px] py-[12px] rounded-xl border-0 bg-transparent hover:bg-bg-hover cursor-pointer text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+        style={font}
+      >
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg bg-bg-hover text-text-secondary transition-colors group-hover:text-text-primary">
+          <Icon size={17} weight="Bold" />
+        </span>
+        <span className="flex-1 min-w-0 flex flex-col gap-[2px]">
+          <span className="text-text-primary text-[13.5px] font-[500] tracking-[-0.006em] leading-snug">
+            {categoryTitles[cat.id]}
+          </span>
+          <span className="text-text-tertiary text-[12.5px] leading-snug">
+            {categoryDescriptions[cat.id]}
+          </span>
+        </span>
+        <RightLine
+          size={15}
+          className="text-text-tertiary shrink-0 transition-transform duration-150 ease-out group-hover:translate-x-[2px]"
+        />
+      </button>
+    );
+  };
+
+  const renderSearchResult = ({
+    categoryId,
+    sectionId,
+  }: {
+    categoryId: CategoryId;
+    sectionId: SectionId;
+  }) => {
+    const Icon = SECTION_ICONS[sectionId];
+    return (
+      <button
+        key={`${categoryId}:${sectionId}`}
+        type="button"
+        onClick={() => openCategory(categoryId, sectionId)}
+        className="group w-full flex items-center gap-[12px] px-[12px] py-[12px] rounded-xl border-0 bg-transparent hover:bg-bg-hover cursor-pointer text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+        style={font}
+      >
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg bg-bg-hover text-text-secondary transition-colors group-hover:text-text-primary">
+          <Icon size={17} weight="Bold" />
+        </span>
+        <span className="flex-1 min-w-0 flex flex-col gap-[2px]">
+          <span className="text-text-tertiary text-[10.5px] font-[600] uppercase tracking-[0.08em] leading-none">
+            {categoryTitles[categoryId]}
+          </span>
+          <span className="text-text-primary text-[13.5px] font-[500] tracking-[-0.006em] leading-snug">
+            {sectionTitles[sectionId]}
+          </span>
+          <span className="text-text-tertiary text-[12.5px] leading-snug">
+            {sectionDescriptions[sectionId]}
+          </span>
+        </span>
+        <RightLine
+          size={15}
+          className="text-text-tertiary shrink-0 transition-transform duration-150 ease-out group-hover:translate-x-[2px]"
+        />
+      </button>
+    );
+  };
+
+  const menuScreen = (
+    <>
+      {searchResults ? (
+        searchResults.length === 0 ? (
+          <p className="text-text-tertiary text-[12.5px] px-[6px] py-[10px] m-0" style={font}>
+            {t("search.no_results") || "Nothing found"}
+          </p>
+        ) : (
+          <div role="list" className="flex flex-col gap-[4px]">
+            {searchResults.map(renderSearchResult)}
+          </div>
+        )
+      ) : (
+        <>
+          <nav
+            className="flex flex-col gap-[16px]"
+            aria-label={t("settings.title")}
+          >
+            {GROUP_IDS.map((groupId) => {
+              const inGroup = visibleCategories.filter((cat) => cat.group === groupId);
+              if (inGroup.length === 0) return null;
+              return (
+                <div key={groupId} className="flex flex-col gap-[4px]">
+                  <p
+                    className="text-text-tertiary text-[10.5px] font-[600] uppercase tracking-[0.08em] m-0 px-[12px] pb-[6px]"
+                    style={font}
+                  >
+                    {t(`settings.groups.${groupId}`)}
+                  </p>
+                  {inGroup.map(renderCategoryRow)}
+                </div>
+              );
+            })}
+          </nav>
+
+          <div className="flex flex-col gap-[4px] pt-[14px] mt-[6px] border-t border-solid border-border-primary">
+            <p
+              className="text-text-tertiary text-[10.5px] font-[600] uppercase tracking-[0.08em] m-0 px-[12px] pb-[6px]"
+              style={font}
+            >
+              {t("settings.groups.help")}
+            </p>
+            <button
+              type="button"
+              onClick={() => openExternal("https://github.com/tryliner/desktop/blob/main/README.md")}
+              className="w-full flex items-center gap-[12px] px-[12px] py-[10px] rounded-xl border-0 bg-transparent text-text-secondary hover:bg-bg-hover hover:text-text-primary cursor-pointer text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+              style={{ ...font, fontSize: "13.5px" }}
+            >
+              <Book2 size={17} weight="Bold" className="text-text-tertiary shrink-0" />
+              <span className="leading-none">{t("settings.docs")}</span>
+              <RightLine size={15} className="ml-auto text-text-tertiary shrink-0" />
+            </button>
+            <button
+              type="button"
+              onClick={() => openExternal("https://t.me/liner_app?direct")}
+              className="w-full flex items-center gap-[12px] px-[12px] py-[10px] rounded-xl border-0 bg-transparent text-text-secondary hover:bg-bg-hover hover:text-text-primary cursor-pointer text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+              style={{ ...font, fontSize: "13.5px" }}
+            >
+              <QuestionCircle size={17} weight="Bold" className="text-text-tertiary shrink-0" />
+              <span className="leading-none">{t("settings.support")}</span>
+              <RightLine size={15} className="ml-auto text-text-tertiary shrink-0" />
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  const categoryScreen = activeCategory ? (
+    <div className="flex flex-col">
+      {activeCategory.sections
+        .filter((sectionId) => {
+          // Overlay and Shortcuts are desktop-only; Android renders the
+          // Discord section of the overlay category instead.
+          if (isAndroidApp() && (sectionId === "Overlay" || sectionId === "Shortcuts")) return false;
+          // Spotify account import needs the Electron OAuth bridge.
+          if (sectionId === "Spotify" && !isSpotifyAccountAvailable()) return false;
+          return !matchingSections.size || matchingSections.has(sectionId);
+        })
+        .map((sectionId, index) => {
+          const SectionComponent = SECTION_COMPONENTS[sectionId];
+          const Icon = SECTION_ICONS[sectionId];
+          const withHeading = activeCategory.sections.length > 1;
+          const rowsFiltered = Boolean(matches.rowMatches?.has(sectionId));
+          return (
+            <div
+              key={sectionId}
+              data-section={sectionId}
+              className={
+                index > 0 ? "mt-[18px] pt-[16px] border-t border-solid border-border-primary" : ""
+              }
+            >
+              {withHeading ? (
+                <div className="flex items-start gap-[10px] pb-[4px]">
+                  <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md bg-bg-hover text-text-secondary">
+                    <Icon size={15} weight="Bold" />
+                  </span>
+                  <div className="min-w-0">
+                    <p
+                      className="text-text-primary text-[13.5px] font-[600] tracking-[-0.008em] m-0 leading-snug"
+                      style={font}
+                    >
+                      {sectionTitles[sectionId]}
+                    </p>
+                    <p
+                      className="text-text-tertiary text-[12.5px] m-0 mt-[2px] leading-snug"
+                      style={font}
+                    >
+                      {sectionDescriptions[sectionId]}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+              <SectionComponent searchQuery={rowsFiltered ? searchQuery : undefined} />
+            </div>
+          );
+        })}
+    </div>
+  ) : null;
+
+  const screenKey = openCategoryId ? `category:${openCategoryId}` : `menu:${isSearching ? "search" : "root"}`;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => (!next ? handleClose() : undefined)}
+      maxWidth={720}
+      className="p-0 h-[70dvh] max-h-[70dvh] md:h-[640px] md:max-h-[86vh] !flex-col overflow-hidden !bg-bg-surface !border-0"
+    >
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* ── Header: search on the menu, back + title inside a category ── */}
+        <div className="shrink-0 px-4 md:px-6 pt-4 pb-[12px] border-b border-border-primary">
+          {openCategoryId && activeCategory ? (
+            <div className="flex items-start gap-[10px]">
+              <button
+                type="button"
+                aria-label={t("common.back") || "Back"}
+                onClick={backToMenu}
+                className="w-[30px] h-[30px] mt-[1px] shrink-0 inline-flex items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors border-0 bg-transparent p-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+              >
+                <ArrowLeftLine size={18} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h3
+                  className="text-text-primary text-[17px] m-0 font-[600] tracking-[-0.022em]"
+                  style={font}
+                >
+                  {categoryTitles[activeCategory.id]}
+                </h3>
+                <p
+                  className="text-text-tertiary text-[13px] m-0 mt-[3px] leading-snug"
+                  style={font}
+                >
+                  {categoryDescriptions[activeCategory.id]}
+                </p>
+              </div>
+              {closeIcon}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-[16px]">
+                <h3
+                  className="text-text-primary text-[17px] m-0 font-[600] tracking-[-0.022em]"
+                  style={font}
+                >
+                  {t("settings.title")}
+                </h3>
+                {closeIcon}
+              </div>
+              <div className="relative flex items-center mt-[12px]">
+                <Search2Line
+                  size={15}
+                  className="absolute left-[11px] text-text-tertiary pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("settings.search_placeholder")}
+                  className="w-full h-[36px] pl-[32px] pr-[28px] bg-bg-elevated text-text-primary text-[13px] rounded-full border-0 outline-none shadow-[inset_0_0_0_1px_var(--border-primary)] placeholder:text-text-tertiary focus:bg-bg-surface focus:shadow-[inset_0_0_0_1px_var(--accent-primary)] focus:ring-4 focus:ring-accent-soft transition-[background-color,box-shadow] duration-200"
+                  style={font}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    aria-label={t("common.cancel") || "Clear"}
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-[6px] p-0 border-0 bg-transparent text-text-tertiary hover:text-text-primary cursor-pointer flex items-center justify-center"
+                  >
+                    <CloseCircleFill size={14} />
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Body: one menu at a time ── */}
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pb-[8px]">
+          <motion.div
+            key={screenKey}
+            initial={{ opacity: 0, x: navDirection * 14 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-auto w-full max-w-[600px]"
+          >
+            {openCategoryId ? categoryScreen : menuScreen}
+          </motion.div>
+        </div>
+
+        {/* ── Footer: profile stays on the menu only ── */}
+        {!openCategoryId && (
+          <div className="shrink-0 px-4 md:px-6 py-[10px] border-t border-solid border-border-primary">
+            <div className="mx-auto w-full max-w-[600px] flex items-center gap-[10px] px-[6px] min-w-0">
+              <span className="relative shrink-0">
+                <UserAvatar user={user ?? null} size={32} />
+                <span
+                  className="absolute right-[-1px] bottom-[-1px] w-[10px] h-[10px] rounded-full bg-[#12B76A] border-2 border-bg-elevated"
+                  aria-hidden
+                />
+              </span>
+              <span className="flex-1 min-w-0 flex flex-col leading-tight">
+                <span className="text-text-primary text-[13px] font-[500] truncate" style={font}>
+                  {displayName}
+                </span>
+                <span className="text-text-tertiary text-[12px] truncate" style={font}>
+                  {handle}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  handleClose();
+                  await logout();
+                }}
+                title={t("settings.profile.sign_out") || "Log out"}
+                aria-label={t("settings.profile.sign_out") || "Log out"}
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-[#E81123] hover:bg-bg-hover transition-colors border-0 bg-transparent cursor-pointer flex items-center justify-center shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/70"
+              >
+                <ExitLine size={18} className="shrink-0" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Dialog>
+  );
+}

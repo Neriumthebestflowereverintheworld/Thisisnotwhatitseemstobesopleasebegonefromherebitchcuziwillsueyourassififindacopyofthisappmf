@@ -1,0 +1,9 @@
+# Vercel builds only the static website from this repo.
+#
+# `electron/` stays: the renderer imports its types (electron/preload, electron/signer).
+# `api-worker/` is the separate API service on Render and is not part of this build;
+# its blueprint is api-worker/render.yaml, so nothing at the repo root claims to be
+# a Vercel service.
+api-worker
+artifacts
+dist

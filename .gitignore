@@ -1,0 +1,83 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# production / build
+/dist
+/dist-electron
+/release
+/build/*
+!/build/icons/
+!/build/icon.png
+!/build/icon.svg
+!/build/icon.ico
+
+# native add-on build output
+/native/*/build/
+/native-build.log
+
+# ios (generated project, synced renderer bundle, build products)
+/ios/Web/
+/ios/Info.plist
+/ios/Neritium.xcodeproj/
+/ios/build/
+/ios/*.ipa
+/ios/build/Payload/
+
+# testing
+/coverage
+
+# android (generated bundle + signing + local test credentials)
+/android/app/src/main/assets/
+/android/keystore.properties
+/android/*.jks
+/android/local.properties
+/android/.gradle
+/android/build
+/android/app/build
+/android-test-account.json
+
+# misc
+.DS_Store
+*.pem
+temp_cover.bin
+test_stills/
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+renderer.log
+
+# env files
+.env
+.env.*
+!.env.example
+!.env.production
+
+# typescript
+*.tsbuildinfo
+
+# cache
+.neritium_local_cache
+signer/
+
+# agent rules
+AGENTS.md
+GEMINI.md
+.agents/
+.agent/
+
+brag-output/
+scratch/
+
+# local-only artifacts
+/my-release-key.jks
+/liner-src/
+
+# worker local secrets and generated state
+/api-worker/.dev.vars
+/api-worker/.wrangler/
