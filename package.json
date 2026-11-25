@@ -5,8 +5,8 @@
   "private": true,
   "description": "Neritium Music Player",
   "author": {
-    "name": "hkamori",
-    "email": "dev@tryliner.fun"
+    "name": "fwzzy&nochills21",
+    "email": "support@neritium.xyz"
   },
   "desktopName": "neritium",
   "main": "dist-electron/main.js",
@@ -59,7 +59,7 @@
     "linux": {
       "executableName": "neritium",
       "syncDesktopName": true,
-      "maintainer": "hkamori <dev@tryliner.fun>",
+      "maintainer": "neritium <support@neritium.xyz>",
       "icon": "build/icons",
       "target": [
         "AppImage",
